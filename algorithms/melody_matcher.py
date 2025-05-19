@@ -10,6 +10,16 @@ class MelodyMatcher:
             'lcs': 0.2,
             'cosine': 0.1
         }
+        
+        # MIDI note range for 2 octaves from C3 to B4
+        self.note_range = {
+            # C3 to B3 (first octave)
+            48: 'C3', 49: 'C#3', 50: 'D3', 51: 'D#3', 52: 'E3', 53: 'F3', 
+            54: 'F#3', 55: 'G3', 56: 'G#3', 57: 'A3', 58: 'A#3', 59: 'B3',
+            # C4 to B4 (second octave)
+            60: 'C4', 61: 'C#4', 62: 'D4', 63: 'D#4', 64: 'E4', 65: 'F4',
+            66: 'F#4', 67: 'G4', 68: 'G#4', 69: 'A4', 70: 'A#4', 71: 'B4'
+        }
 
     def dtw_distance(self, seq1: List[int], seq2: List[int]) -> float:
         """
@@ -133,4 +143,80 @@ class MelodyMatcher:
         return {
             'final_score': final_score,
             'individual_scores': normalized_scores
+        }
+        
+    def binary_note_match(self, target_notes: List[int], played_notes: List[int]) -> Dict:
+        """
+        Perform exact binary matching for piano UI with 2 octaves (C3-B4)
+        Each note is either correct or incorrect
+        
+        Args:
+            target_notes: List of expected MIDI note numbers
+            played_notes: List of actual played MIDI note numbers
+            
+        Returns:
+            Dictionary with match results
+        """
+        if not target_notes or not played_notes:
+            return {
+                'correct_count': 0,
+                'total_notes': len(target_notes),
+                'accuracy': 0.0,
+                'note_results': []
+            }
+            
+        # Initialize results
+        note_results = []
+        correct_count = 0
+        
+        # Match notes in sequence
+        for i in range(min(len(target_notes), len(played_notes))):
+            is_correct = target_notes[i] == played_notes[i]
+            note_name = self.note_range.get(target_notes[i], f"Unknown({target_notes[i]})")
+            played_name = self.note_range.get(played_notes[i], f"Unknown({played_notes[i]})")
+            
+            note_results.append({
+                'index': i,
+                'target_note': target_notes[i],
+                'target_note_name': note_name,
+                'played_note': played_notes[i],
+                'played_note_name': played_name,
+                'is_correct': is_correct
+            })
+            
+            if is_correct:
+                correct_count += 1
+                
+        # Handle different lengths
+        for i in range(len(played_notes), len(target_notes)):
+            note_name = self.note_range.get(target_notes[i], f"Unknown({target_notes[i]})")
+            note_results.append({
+                'index': i,
+                'target_note': target_notes[i],
+                'target_note_name': note_name,
+                'played_note': None,
+                'played_note_name': 'Missing',
+                'is_correct': False
+            })
+            
+        for i in range(len(target_notes), len(played_notes)):
+            played_name = self.note_range.get(played_notes[i], f"Unknown({played_notes[i]})")
+            note_results.append({
+                'index': i,
+                'target_note': None,
+                'target_note_name': 'Extra',
+                'played_note': played_notes[i],
+                'played_note_name': played_name,
+                'is_correct': False
+            })
+        
+        # Calculate accuracy
+        total_notes = max(len(target_notes), len(played_notes))
+        accuracy = correct_count / total_notes if total_notes > 0 else 0.0
+        
+        return {
+            'correct_count': correct_count,
+            'total_notes': total_notes,
+            'accuracy': accuracy,
+            'note_results': note_results
         } 
