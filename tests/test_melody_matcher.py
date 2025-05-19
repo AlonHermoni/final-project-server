@@ -25,7 +25,7 @@ class TestMelodyMatcher(unittest.TestCase):
             self.melodies['twinkle_twinkle']
         )
         self.assertAlmostEqual(result['final_score'], 1.0, places=2)
-        self.assertAlmostEqual(result['individual_scores']['dtw'], 1.0, places=2)
+        self.assertAlmostEqual(result['individual_scores']['dtw_combined'], 1.0, places=2)
         self.assertAlmostEqual(result['individual_scores']['levenshtein'], 1.0, places=2)
         self.assertAlmostEqual(result['individual_scores']['lcs'], 1.0, places=2)
         self.assertAlmostEqual(result['individual_scores']['cosine'], 1.0, places=2)
@@ -84,6 +84,42 @@ class TestMelodyMatcher(unittest.TestCase):
         
         result = self.matcher.compare_melodies([60], [72])
         self.assertLess(result['final_score'], 1.0)
+        
+    def test_get_difficulty_estimate(self):
+        """Test the melody difficulty estimator"""
+        # Simple melody (C major scale)
+        simple = [60, 62, 64, 65, 67, 69, 71, 72]
+        simple_result = self.matcher.get_difficulty_estimate(simple)
+        
+        # More complex melody (wide intervals, more notes)
+        complex_melody = [60, 72, 64, 76, 60, 67, 60, 69, 72, 65, 62, 70, 67, 74]
+        complex_result = self.matcher.get_difficulty_estimate(complex_melody)
+        
+        # Very complicated melody
+        very_complex = [60, 72, 55, 77, 67, 63, 70, 59, 61, 73, 68, 50, 79, 66, 58, 71]
+        very_complex_result = self.matcher.get_difficulty_estimate(very_complex)
+        
+        # Verify scores are in correct range
+        self.assertGreaterEqual(simple_result['difficulty_score'], 0.0)
+        self.assertLessEqual(simple_result['difficulty_score'], 1.0)
+        
+        # Complex melody should be harder than simple one
+        self.assertGreater(complex_result['difficulty_score'], simple_result['difficulty_score'])
+        
+        # Very complex melody should be hardest
+        self.assertGreater(very_complex_result['difficulty_score'], complex_result['difficulty_score'])
+        
+        # Verify we get a difficulty level text
+        self.assertIn(simple_result['difficulty_level'], 
+                     ["Very Easy", "Easy", "Intermediate", "Hard", "Very Hard"])
+        
+        # Check empty melody
+        empty_result = self.matcher.get_difficulty_estimate([])
+        self.assertEqual(empty_result['difficulty_score'], 0.0)
+        
+        # Check single note melody
+        single_result = self.matcher.get_difficulty_estimate([60])
+        self.assertEqual(single_result['difficulty_score'], 0.0)
 
 if __name__ == '__main__':
     unittest.main() 

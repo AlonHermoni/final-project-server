@@ -1,17 +1,18 @@
 import numpy as np
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional, Union
 import math
 
 class MelodyMatcher:
     def __init__(self):
         self.weights = {
-            'dtw': 0.4,
-            'levenshtein': 0.3,
-            'lcs': 0.2,
-            'cosine': 0.1
+            'dtw_pitch': 0.4,
+            'dtw_timing': 0.3,
+            'levenshtein': 0.15,
+            'lcs': 0.1,
+            'cosine': 0.05
         }
         
-        # MIDI note range for 2 octaves from C3 to B4
+        # MIDI note range for 2 octaves from C3 to B4 (for note name mapping)
         self.note_range = {
             # C3 to B3 (first octave)
             48: 'C3', 49: 'C#3', 50: 'D3', 51: 'D#3', 52: 'E3', 53: 'F3', 
@@ -21,25 +22,181 @@ class MelodyMatcher:
             66: 'F#4', 67: 'G4', 68: 'G#4', 69: 'A4', 70: 'A#4', 71: 'B4'
         }
 
-    def dtw_distance(self, seq1: List[int], seq2: List[int]) -> float:
+    def dtw_distance(self, seq1: List[int], seq2: List[int], 
+                    timings1: List[float] = None, timings2: List[float] = None,
+                    durations1: List[float] = None, durations2: List[float] = None,
+                    pitch_weight: float = 0.6, timing_weight: float = 0.4) -> Tuple[float, float, float, List[Dict]]:
         """
-        Dynamic Time Warping algorithm for tempo-independent melody matching
+        Enhanced Dynamic Time Warping algorithm that considers both pitch and timing
+        
+        Args:
+            seq1: First melody (list of MIDI note numbers)
+            seq2: Second melody (list of MIDI note numbers)
+            timings1: Onset times for first melody (in ms from start)
+            timings2: Onset times for second melody (in ms from start)
+            durations1: Note durations for first melody (in ms)
+            durations2: Note durations for second melody (in ms)
+            pitch_weight: Weight given to pitch differences (0-1)
+            timing_weight: Weight given to timing differences (0-1)
+            
+        Returns:
+            Tuple of (combined_distance, pitch_distance, timing_distance, note_details)
         """
         n, m = len(seq1), len(seq2)
+        
+        # Create DTW matrix for combined cost
         dtw_matrix = np.zeros((n + 1, m + 1))
         dtw_matrix.fill(float('inf'))
         dtw_matrix[0, 0] = 0
-
+        
+        # Create separate matrices for pitch and timing if needed
+        pitch_matrix = np.zeros((n + 1, m + 1))
+        pitch_matrix.fill(float('inf'))
+        pitch_matrix[0, 0] = 0
+        
+        timing_matrix = np.zeros((n + 1, m + 1))
+        timing_matrix.fill(float('inf'))
+        timing_matrix[0, 0] = 0
+        
+        # Store alignment details for output
+        details = []
+        
+        # Adjust timing to align starting points if timings are provided
+        # This handles differences in when the user started playing
+        adjusted_timings2 = timings2
+        if timings1 and timings2:
+            timing_offset = timings2[0] - timings1[0]
+            adjusted_timings2 = [t - timing_offset for t in timings2]
+        
+        # Track alignment path for generating note details
+        alignment_path = []
+        
+        # Constants for normalizing costs
+        MAX_PITCH_DIFF = 127  # Maximum MIDI note difference
+        MAX_TIMING_DIFF = 1000.0  # Assume maximum reasonable timing error in ms
+        MAX_DURATION_DIFF = 500.0  # Assume maximum reasonable duration error in ms
+        
+        # Fill the DTW matrices
         for i in range(1, n + 1):
             for j in range(1, m + 1):
-                cost = abs(seq1[i-1] - seq2[j-1])
-                dtw_matrix[i, j] = cost + min(
+                # Calculate pitch difference (normalized 0-1)
+                pitch_diff = abs(seq1[i-1] - seq2[j-1]) / MAX_PITCH_DIFF
+                pitch_matrix[i, j] = pitch_diff + min(
+                    pitch_matrix[i-1, j],
+                    pitch_matrix[i, j-1],
+                    pitch_matrix[i-1, j-1]
+                )
+                
+                # Calculate timing difference if available
+                if timings1 and adjusted_timings2 and durations1 and durations2:
+                    # Onset timing difference (normalized 0-1)
+                    timing_diff = abs(timings1[i-1] - adjusted_timings2[j-1]) / MAX_TIMING_DIFF
+                    # Duration difference (normalized 0-1)
+                    duration_diff = abs(durations1[i-1] - durations2[j-1]) / MAX_DURATION_DIFF
+                    # Combined timing cost (weighting onset more than duration)
+                    timing_cost = 0.7 * timing_diff + 0.3 * duration_diff
+                    
+                    timing_matrix[i, j] = timing_cost + min(
+                        timing_matrix[i-1, j],
+                        timing_matrix[i, j-1],
+                        timing_matrix[i-1, j-1]
+                    )
+                else:
+                    # No timing data available
+                    timing_cost = 0
+                    timing_matrix[i, j] = timing_matrix[i-1, j-1]
+                
+                # Calculate combined cost
+                combined_cost = (pitch_weight * pitch_diff) + (timing_weight * timing_cost if timings1 else 0)
+                dtw_matrix[i, j] = combined_cost + min(
                     dtw_matrix[i-1, j],    # insertion
                     dtw_matrix[i, j-1],    # deletion
                     dtw_matrix[i-1, j-1]   # match
                 )
-
-        return dtw_matrix[n, m]
+        
+        # Trace back to find alignment path
+        i, j = n, m
+        path = []
+        while i > 0 and j > 0:
+            path.append((i-1, j-1))
+            
+            # Find which direction we came from
+            min_val = min(dtw_matrix[i-1, j-1], dtw_matrix[i-1, j], dtw_matrix[i, j-1])
+            
+            if min_val == dtw_matrix[i-1, j-1]:
+                i -= 1
+                j -= 1
+            elif min_val == dtw_matrix[i-1, j]:
+                i -= 1
+            else:
+                j -= 1
+        
+        path.reverse()
+        
+        # Generate note detail information
+        note_details = []
+        for idx, (i, j) in enumerate(path):
+            # Calculate if this is an exact pitch match
+            is_correct_pitch = seq1[i] == seq2[j]
+            
+            # Create detail record
+            detail = {
+                'index': idx,
+                'target_note': seq1[i],
+                'target_note_name': self.note_range.get(seq1[i], f"Unknown({seq1[i]})"),
+                'played_note': seq2[j],
+                'played_note_name': self.note_range.get(seq2[j], f"Unknown({seq2[j]})"),
+                'is_correct_pitch': is_correct_pitch
+            }
+            
+            # Add timing details if available
+            if timings1 and adjusted_timings2 and durations1 and durations2:
+                onset_error = abs(timings1[i] - adjusted_timings2[j])
+                duration_error = abs(durations1[i] - durations2[j])
+                
+                detail.update({
+                    'onset_error': onset_error,
+                    'duration_error': duration_error,
+                    'target_onset': timings1[i],
+                    'played_onset': adjusted_timings2[j],
+                    'target_duration': durations1[i],
+                    'played_duration': durations2[j]
+                })
+            
+            note_details.append(detail)
+        
+        # Calculate exact matches for pitch accuracy
+        pitch_matches = sum(1 for detail in note_details if detail['is_correct_pitch'])
+        pitch_accuracy = pitch_matches / len(note_details) if note_details else 0.0
+        
+        # Calculate timing accuracy if data available
+        if timings1 and timings2 and durations1 and durations2:
+            onset_errors = [detail['onset_error'] for detail in note_details]
+            duration_errors = [detail['duration_error'] for detail in note_details]
+            
+            # Normalize errors (0 = max error, 1 = perfect)
+            norm_onset_errors = [1 - min(error / MAX_TIMING_DIFF, 1.0) for error in onset_errors]
+            norm_duration_errors = [1 - min(error / MAX_DURATION_DIFF, 1.0) for error in duration_errors]
+            
+            onset_accuracy = sum(norm_onset_errors) / len(norm_onset_errors) if norm_onset_errors else 0.0
+            duration_accuracy = sum(norm_duration_errors) / len(norm_duration_errors) if norm_duration_errors else 0.0
+            
+            # Combined timing accuracy (weight onset more than duration)
+            timing_accuracy = 0.7 * onset_accuracy + 0.3 * duration_accuracy
+        else:
+            timing_accuracy = 0.0
+        
+        # Normalize DTW distances to 0-1 scale
+        # For DTW, lower values are better, so we invert to get "similarity"
+        max_combined_dist = n + m  # Theoretical max combined distance
+        max_pitch_dist = n + m     # Theoretical max pitch distance
+        max_timing_dist = n + m    # Theoretical max timing distance
+        
+        normalized_combined = 1.0 - min(dtw_matrix[n, m] / max_combined_dist, 1.0)
+        normalized_pitch = 1.0 - min(pitch_matrix[n, m] / max_pitch_dist, 1.0)
+        normalized_timing = timing_accuracy  # Use calculated timing accuracy
+        
+        return normalized_combined, normalized_pitch, normalized_timing, note_details
 
     def levenshtein_distance(self, seq1: List[int], seq2: List[int]) -> int:
         """
@@ -87,7 +244,7 @@ class MelodyMatcher:
         Cosine Similarity for overall melody comparison
         """
         # Convert sequences to frequency vectors
-        max_note = max(max(seq1), max(seq2)) + 1
+        max_note = max(max(seq1) if seq1 else 0, max(seq2) if seq2 else 0) + 1
         vec1 = np.zeros(max_note)
         vec2 = np.zeros(max_note)
 
@@ -112,111 +269,194 @@ class MelodyMatcher:
         """
         return 1 - (score / max_score) if max_score > 0 else 0
 
-    def compare_melodies(self, melody1: List[int], melody2: List[int]) -> Dict[str, float]:
+    def compare_melodies(self, melody1: List[int], melody2: List[int], 
+                          timings1: List[float] = None, timings2: List[float] = None, 
+                          durations1: List[float] = None, durations2: List[float] = None) -> Dict[str, Union[float, Dict]]:
         """
         Compare two melodies using all algorithms and return weighted score
+        
+        Args:
+            melody1: Target melody (list of MIDI note numbers)
+            melody2: Played melody (list of MIDI note numbers)
+            timings1: Note onset times for target melody (in ms from start)
+            timings2: Note onset times for played melody (in ms from start)
+            durations1: Note durations for target melody (in ms)
+            durations2: Note durations for played melody (in ms)
+            
+        Returns:
+            Dictionary with final score and individual scores
         """
-        # Calculate individual scores
-        dtw_score = self.dtw_distance(melody1, melody2)
+        if not melody1 or not melody2:
+            return {
+                'final_score': 0.0,
+                'pitch_accuracy': 0.0,
+                'timing_accuracy': 0.0,
+                'individual_scores': {},
+                'note_details': []
+            }
+        
+        # Run enhanced DTW with timing information if available
+        dtw_combined, dtw_pitch, dtw_timing, note_details = self.dtw_distance(
+            melody1, melody2, 
+            timings1, timings2, 
+            durations1, durations2
+        )
+            
+        # Calculate other algorithm scores
         levenshtein_score = self.levenshtein_distance(melody1, melody2)
         lcs_score = self.lcs_length(melody1, melody2)
         cosine_score = self.cosine_similarity(melody1, melody2)
-
+        
         # Normalize scores
-        max_dtw = max(len(melody1), len(melody2)) * 127  # Assuming MIDI note range
         max_levenshtein = max(len(melody1), len(melody2))
         max_lcs = min(len(melody1), len(melody2))
 
         normalized_scores = {
-            'dtw': self.normalize_score(dtw_score, max_dtw),
+            'dtw_combined': dtw_combined,
+            'dtw_pitch': dtw_pitch,
+            'dtw_timing': dtw_timing,
             'levenshtein': self.normalize_score(levenshtein_score, max_levenshtein),
             'lcs': lcs_score / max_lcs if max_lcs > 0 else 0,
             'cosine': cosine_score
         }
-
+        
+        # Count exact pitch matches from the note details
+        exact_matches = sum(1 for detail in note_details if detail.get('is_correct_pitch', False))
+        total_notes = len(note_details)
+        pitch_accuracy = exact_matches / total_notes if total_notes > 0 else 0.0
+        
         # Calculate weighted final score
-        final_score = sum(
-            normalized_scores[algo] * weight 
-            for algo, weight in self.weights.items()
-        )
-
-        return {
+        if timings1 and timings2 and durations1 and durations2:
+            # If timing data available, use combined DTW score
+            final_score = (
+                (self.weights['dtw_pitch'] * normalized_scores['dtw_pitch']) +
+                (self.weights['dtw_timing'] * normalized_scores['dtw_timing']) +
+                (self.weights['levenshtein'] * normalized_scores['levenshtein']) +
+                (self.weights['lcs'] * normalized_scores['lcs']) +
+                (self.weights['cosine'] * normalized_scores['cosine'])
+            )
+        else:
+            # If no timing data, redistribute timing weight to other algorithms
+            pitch_weight = sum(weight for algo, weight in self.weights.items() if 'timing' not in algo)
+            final_score = (
+                (self.weights['dtw_pitch'] * normalized_scores['dtw_pitch']) +
+                (self.weights['levenshtein'] * normalized_scores['levenshtein']) +
+                (self.weights['lcs'] * normalized_scores['lcs']) +
+                (self.weights['cosine'] * normalized_scores['cosine'])
+            ) / pitch_weight
+        
+        # Prepare response
+        result = {
             'final_score': final_score,
-            'individual_scores': normalized_scores
+            'pitch_accuracy': pitch_accuracy,
+            'individual_scores': normalized_scores,
+            'note_details': note_details
         }
         
-    def binary_note_match(self, target_notes: List[int], played_notes: List[int]) -> Dict:
+        # Add timing specific results if available
+        if timings1 and timings2 and durations1 and durations2:
+            result['timing_accuracy'] = normalized_scores['dtw_timing']
+            
+            # Extract onset and duration accuracies from note details
+            if note_details:
+                onset_errors = [detail.get('onset_error', 0) for detail in note_details if 'onset_error' in detail]
+                duration_errors = [detail.get('duration_error', 0) for detail in note_details if 'duration_error' in detail]
+                
+                if onset_errors:
+                    max_timing_error = 1000.0
+                    norm_onset_errors = [1 - min(error / max_timing_error, 1.0) for error in onset_errors]
+                    onset_accuracy = sum(norm_onset_errors) / len(norm_onset_errors)
+                    result['onset_accuracy'] = onset_accuracy
+                
+                if duration_errors:
+                    max_duration_error = 500.0
+                    norm_duration_errors = [1 - min(error / max_duration_error, 1.0) for error in duration_errors]
+                    duration_accuracy = sum(norm_duration_errors) / len(norm_duration_errors)
+                    result['duration_accuracy'] = duration_accuracy
+        else:
+            result['timing_accuracy'] = 0.0
+            
+        return result 
+        
+    def get_difficulty_estimate(self, melody: List[int]) -> Dict[str, float]:
         """
-        Perform exact binary matching for piano UI with 2 octaves (C3-B4)
-        Each note is either correct or incorrect
+        Estimate the difficulty level of a melody based on various musical factors
         
         Args:
-            target_notes: List of expected MIDI note numbers
-            played_notes: List of actual played MIDI note numbers
+            melody: List of MIDI note numbers
             
         Returns:
-            Dictionary with match results
+            Dictionary with difficulty scores and analysis
         """
-        if not target_notes or not played_notes:
+        if not melody or len(melody) < 2:
             return {
-                'correct_count': 0,
-                'total_notes': len(target_notes),
-                'accuracy': 0.0,
-                'note_results': []
+                'difficulty_score': 0.0,
+                'factors': {
+                    'length': 0.0,
+                    'interval_complexity': 0.0,
+                    'range': 0.0,
+                    'unique_notes': 0.0
+                }
             }
-            
-        # Initialize results
-        note_results = []
-        correct_count = 0
         
-        # Match notes in sequence
-        for i in range(min(len(target_notes), len(played_notes))):
-            is_correct = target_notes[i] == played_notes[i]
-            note_name = self.note_range.get(target_notes[i], f"Unknown({target_notes[i]})")
-            played_name = self.note_range.get(played_notes[i], f"Unknown({played_notes[i]})")
-            
-            note_results.append({
-                'index': i,
-                'target_note': target_notes[i],
-                'target_note_name': note_name,
-                'played_note': played_notes[i],
-                'played_note_name': played_name,
-                'is_correct': is_correct
-            })
-            
-            if is_correct:
-                correct_count += 1
-                
-        # Handle different lengths
-        for i in range(len(played_notes), len(target_notes)):
-            note_name = self.note_range.get(target_notes[i], f"Unknown({target_notes[i]})")
-            note_results.append({
-                'index': i,
-                'target_note': target_notes[i],
-                'target_note_name': note_name,
-                'played_note': None,
-                'played_note_name': 'Missing',
-                'is_correct': False
-            })
-            
-        for i in range(len(target_notes), len(played_notes)):
-            played_name = self.note_range.get(played_notes[i], f"Unknown({played_notes[i]})")
-            note_results.append({
-                'index': i,
-                'target_note': None,
-                'target_note_name': 'Extra',
-                'played_note': played_notes[i],
-                'played_note_name': played_name,
-                'is_correct': False
-            })
+        # Calculate various difficulty factors
         
-        # Calculate accuracy
-        total_notes = max(len(target_notes), len(played_notes))
-        accuracy = correct_count / total_notes if total_notes > 0 else 0.0
+        # 1. Length factor (longer melodies are harder)
+        length = len(melody)
+        # Normalize length to 0-1 scale (assume 32 notes is max difficulty)
+        length_factor = min(length / 32.0, 1.0)
         
+        # 2. Interval complexity (larger intervals are harder)
+        intervals = [abs(melody[i] - melody[i-1]) for i in range(1, len(melody))]
+        avg_interval = sum(intervals) / len(intervals) if intervals else 0
+        # Normalize to 0-1 (assume average interval of 12 semitones is max difficulty)
+        interval_factor = min(avg_interval / 12.0, 1.0)
+        
+        # 3. Range complexity (wider range is harder)
+        melody_range = max(melody) - min(melody) if melody else 0
+        # Normalize to 0-1 (assume 24 semitones/2 octaves is max difficulty)
+        range_factor = min(melody_range / 24.0, 1.0)
+        
+        # 4. Unique notes factor (more unique notes is harder)
+        unique_notes = len(set(melody))
+        # Normalize to 0-1 (assume 12 unique notes is max difficulty)
+        unique_factor = min(unique_notes / 12.0, 1.0)
+        
+        # Calculate weighted difficulty score
+        difficulty_score = (
+            0.3 * length_factor +
+            0.3 * interval_factor + 
+            0.2 * range_factor +
+            0.2 * unique_factor
+        )
+        
+        # Return difficulty estimate and factor breakdown
         return {
-            'correct_count': correct_count,
-            'total_notes': total_notes,
-            'accuracy': accuracy,
-            'note_results': note_results
-        } 
+            'difficulty_score': difficulty_score,
+            'difficulty_level': self._difficulty_level_from_score(difficulty_score),
+            'factors': {
+                'length': length_factor,
+                'interval_complexity': interval_factor,
+                'range': range_factor,
+                'unique_notes': unique_factor
+            },
+            'analysis': {
+                'length': length,
+                'average_interval': avg_interval,
+                'range_semitones': melody_range,
+                'unique_notes': unique_notes
+            }
+        }
+    
+    def _difficulty_level_from_score(self, score: float) -> str:
+        """Convert numerical difficulty score to text level"""
+        if score < 0.2:
+            return "Very Easy"
+        elif score < 0.4:
+            return "Easy"
+        elif score < 0.6:
+            return "Intermediate"
+        elif score < 0.8:
+            return "Hard"
+        else:
+            return "Very Hard" 

@@ -41,14 +41,14 @@ def compare_melodies():
                 'error': 'Missing required fields: melody1 and melody2'
             }), 400
 
-        melody1 = data['melody1']
-        melody2 = data['melody2']
+        melody1 = data['melody1']  # Target melody
+        melody2 = data['melody2']  # Played melody
         
-        # Optional parameters
-        durations1 = data.get('durations1')
-        durations2 = data.get('durations2')
-        custom_weights = data.get('weights')
-        include_letter_grade = data.get('include_letter_grade', False)
+        # Optional timing and duration data
+        timings1 = data.get('timings1')  # Target note onset times
+        timings2 = data.get('timings2')  # Played note onset times
+        durations1 = data.get('durations1')  # Target note durations
+        durations2 = data.get('durations2')  # Played note durations
 
         # Validate input
         if not isinstance(melody1, list) or not isinstance(melody2, list):
@@ -56,28 +56,37 @@ def compare_melodies():
                 'error': 'Melodies must be lists of integers'
             }), 400
             
-        # Validate durations if provided
+        # Validate timing data if provided
+        if timings1 and not isinstance(timings1, list):
+            return jsonify({'error': 'timings1 must be a list of numbers'}), 400
+        if timings2 and not isinstance(timings2, list):
+            return jsonify({'error': 'timings2 must be a list of numbers'}), 400
+            
+        # Validate duration data if provided
         if durations1 and not isinstance(durations1, list):
             return jsonify({'error': 'durations1 must be a list of numbers'}), 400
         if durations2 and not isinstance(durations2, list):
             return jsonify({'error': 'durations2 must be a list of numbers'}), 400
-        
-        # Validate custom weights if provided
-        if custom_weights and not isinstance(custom_weights, dict):
-            return jsonify({'error': 'weights must be a dictionary'}), 400
+            
+        # Validate lengths
+        if timings1 and len(timings1) != len(melody1):
+            return jsonify({'error': 'timings1 must have the same length as melody1'}), 400
+        if timings2 and len(timings2) != len(melody2):
+            return jsonify({'error': 'timings2 must have the same length as melody2'}), 400
+        if durations1 and len(durations1) != len(melody1):
+            return jsonify({'error': 'durations1 must have the same length as melody1'}), 400
+        if durations2 and len(durations2) != len(melody2):
+            return jsonify({'error': 'durations2 must have the same length as melody2'}), 400
 
-        # Compare melodies
+        # Compare melodies with all available data
         result = melody_matcher.compare_melodies(
             melody1, 
-            melody2, 
-            durations1=durations1, 
-            durations2=durations2, 
-            custom_weights=custom_weights
+            melody2,
+            timings1=timings1,
+            timings2=timings2,
+            durations1=durations1,
+            durations2=durations2
         )
-        
-        # Add letter grade if requested
-        if include_letter_grade:
-            result['letter_grade'] = melody_matcher.get_letter_grade(result['final_score'])
         
         return jsonify({
             'success': True,
@@ -88,7 +97,7 @@ def compare_melodies():
         return jsonify({
             'error': str(e)
         }), 500
-        
+
 @app.route('/api/estimate-difficulty', methods=['POST'])
 def estimate_difficulty():
     try:
@@ -109,75 +118,6 @@ def estimate_difficulty():
 
         # Estimate difficulty
         result = melody_matcher.get_difficulty_estimate(melody)
-        
-        return jsonify({
-            'success': True,
-            'result': result
-        })
-
-    except Exception as e:
-        return jsonify({
-            'error': str(e)
-        }), 500
-        
-@app.route('/api/transpose-melody', methods=['POST'])
-def transpose_melody():
-    try:
-        data = request.get_json()
-        
-        if not data or 'melody' not in data or 'semitones' not in data:
-            return jsonify({
-                'error': 'Missing required fields: melody and semitones'
-            }), 400
-
-        melody = data['melody']
-        semitones = data['semitones']
-
-        # Validate input
-        if not isinstance(melody, list):
-            return jsonify({
-                'error': 'Melody must be a list of integers'
-            }), 400
-            
-        if not isinstance(semitones, int):
-            return jsonify({
-                'error': 'semitones must be an integer'
-            }), 400
-
-        # Transpose melody
-        result = melody_matcher.transpose_melody(melody, semitones)
-        
-        return jsonify({
-            'success': True,
-            'result': result
-        })
-
-    except Exception as e:
-        return jsonify({
-            'error': str(e)
-        }), 500
-
-@app.route('/api/compare-piano-notes', methods=['POST'])
-def compare_piano_notes():
-    try:
-        data = request.get_json()
-        
-        if not data or 'target_notes' not in data or 'played_notes' not in data:
-            return jsonify({
-                'error': 'Missing required fields: target_notes and played_notes'
-            }), 400
-
-        target_notes = data['target_notes']
-        played_notes = data['played_notes']
-
-        # Validate input
-        if not isinstance(target_notes, list) or not isinstance(played_notes, list):
-            return jsonify({
-                'error': 'Notes must be lists of integers'
-            }), 400
-
-        # Compare notes using binary matching
-        result = melody_matcher.binary_note_match(target_notes, played_notes)
         
         return jsonify({
             'success': True,
