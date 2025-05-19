@@ -71,10 +71,10 @@ class MelodyMatcher:
         # Track alignment path for generating note details
         alignment_path = []
         
-        # Constants for normalizing costs - UPDATED FOR MORE DISCRIMINATION
+        # Constants for normalizing costs - UPDATED FOR MORE BALANCED DISCRIMINATION
         MAX_PITCH_DIFF = 24.0  # Reduced from 127 to 24 (2 octaves) for more realistic scaling
-        MAX_TIMING_DIFF = 300.0  # Reduced from 1000ms to 300ms
-        MAX_DURATION_DIFF = 200.0  # Reduced from 500ms to 200ms
+        MAX_TIMING_DIFF = 600.0  # Increased from 300ms to 600ms - more forgiving
+        MAX_DURATION_DIFF = 350.0  # Increased from 200ms to 350ms - more forgiving
         
         # Fill the DTW matrices
         for i in range(1, n + 1):
@@ -94,13 +94,13 @@ class MelodyMatcher:
                 if timings1 and adjusted_timings2 and durations1 and durations2:
                     # Onset timing difference (normalized 0-1)
                     timing_diff = abs(timings1[i-1] - adjusted_timings2[j-1]) / MAX_TIMING_DIFF
-                    # Apply non-linear transformation to timing differences
-                    timing_diff = min(timing_diff * 1.5, 1.0)  # Make small differences more significant
+                    # Apply non-linear transformation to timing differences (less aggressive)
+                    timing_diff = min(timing_diff * 1.2, 1.0)  # Reduced from 1.5 to 1.2
                     
                     # Duration difference (normalized 0-1)
                     duration_diff = abs(durations1[i-1] - durations2[j-1]) / MAX_DURATION_DIFF
-                    # Apply non-linear transformation to duration differences
-                    duration_diff = min(duration_diff * 1.5, 1.0)  # Make small differences more significant
+                    # Apply non-linear transformation to duration differences (less aggressive)
+                    duration_diff = min(duration_diff * 1.2, 1.0)  # Reduced from 1.5 to 1.2
                     
                     # Combined timing cost (weighting onset more than duration)
                     timing_cost = 0.7 * timing_diff + 0.3 * duration_diff
@@ -187,9 +187,9 @@ class MelodyMatcher:
             norm_onset_errors = [1 - min(error / MAX_TIMING_DIFF, 1.0) for error in onset_errors]
             norm_duration_errors = [1 - min(error / MAX_DURATION_DIFF, 1.0) for error in duration_errors]
             
-            # Apply non-linear transformation to make algorithm more discriminating
-            norm_onset_errors = [score ** 1.5 for score in norm_onset_errors]  # Emphasize errors
-            norm_duration_errors = [score ** 1.5 for score in norm_duration_errors]  # Emphasize errors
+            # Apply non-linear transformation to make algorithm more discriminating (less aggressive)
+            norm_onset_errors = [score ** 1.2 for score in norm_onset_errors]  # Reduced from 1.5 to 1.2
+            norm_duration_errors = [score ** 1.2 for score in norm_duration_errors]  # Reduced from 1.5 to 1.2
             
             onset_accuracy = sum(norm_onset_errors) / len(norm_onset_errors) if norm_onset_errors else 0.0
             duration_accuracy = sum(norm_duration_errors) / len(norm_duration_errors) if norm_duration_errors else 0.0
@@ -207,9 +207,9 @@ class MelodyMatcher:
         normalized_combined = 1.0 - min(dtw_matrix[n, m] / adjusted_max_dist, 1.0)
         normalized_pitch = 1.0 - min(pitch_matrix[n, m] / adjusted_max_dist, 1.0)
         
-        # Apply non-linear transformation to make scores more discriminating
-        normalized_combined = normalized_combined ** 2  # Square the score to spread out high values
-        normalized_pitch = normalized_pitch ** 2  # Square the score to spread out high values
+        # Apply non-linear transformation to make scores more discriminating (less aggressive for pitch)
+        normalized_combined = normalized_combined ** 1.5  # Reduced from 2.0 to 1.5
+        normalized_pitch = normalized_pitch ** 1.5  # Reduced from 2.0 to 1.5
         
         # Use calculated timing accuracy (already transformed)
         normalized_timing = timing_accuracy
@@ -357,8 +357,8 @@ class MelodyMatcher:
         total_notes = len(note_details)
         pitch_accuracy = (exact_matches / total_notes if total_notes > 0 else 0.0)
         
-        # Apply non-linear transformation to pitch accuracy
-        pitch_accuracy = pitch_accuracy ** 1.5  # Apply exponent to make more discriminating
+        # Apply non-linear transformation to pitch accuracy (less aggressive)
+        pitch_accuracy = pitch_accuracy ** 1.3  # Reduced from 1.5 to 1.3
         
         # Calculate weighted final score
         if timings1 and timings2 and durations1 and durations2:
@@ -380,8 +380,8 @@ class MelodyMatcher:
                 (self.weights['cosine'] * normalized_scores['cosine'])
             ) / pitch_weight
         
-        # Apply final non-linear transformation to make overall score more discriminating
-        final_score = final_score ** 1.25  # Apply exponent to spread out high values
+        # Apply final non-linear transformation to make overall score more discriminating (less aggressive)
+        final_score = final_score ** 1.15  # Reduced from 1.25 to 1.15
         
         # Prepare response
         result = {
@@ -401,18 +401,18 @@ class MelodyMatcher:
                 duration_errors = [detail.get('duration_error', 0) for detail in note_details if 'duration_error' in detail]
                 
                 if onset_errors:
-                    max_timing_error = 300.0  # Reduced from 1000ms
+                    max_timing_error = 600.0  # Increased from 300ms to 600ms
                     norm_onset_errors = [1 - min(error / max_timing_error, 1.0) for error in onset_errors]
-                    # Apply non-linear transformation
-                    norm_onset_errors = [score ** 1.5 for score in norm_onset_errors]
+                    # Apply non-linear transformation (less aggressive)
+                    norm_onset_errors = [score ** 1.2 for score in norm_onset_errors]  # Reduced from 1.5 to 1.2
                     onset_accuracy = sum(norm_onset_errors) / len(norm_onset_errors)
                     result['onset_accuracy'] = onset_accuracy
                 
                 if duration_errors:
-                    max_duration_error = 200.0  # Reduced from 500ms
+                    max_duration_error = 350.0  # Increased from 200ms to 350ms
                     norm_duration_errors = [1 - min(error / max_duration_error, 1.0) for error in duration_errors]
-                    # Apply non-linear transformation
-                    norm_duration_errors = [score ** 1.5 for score in norm_duration_errors]
+                    # Apply non-linear transformation (less aggressive)
+                    norm_duration_errors = [score ** 1.2 for score in norm_duration_errors]  # Reduced from 1.5 to 1.2
                     duration_accuracy = sum(norm_duration_errors) / len(norm_duration_errors)
                     result['duration_accuracy'] = duration_accuracy
         else:
