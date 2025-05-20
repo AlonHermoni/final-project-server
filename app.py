@@ -16,7 +16,21 @@ load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+
+# Enable CORS with specific settings
+CORS(app, resources={r"/*": {
+    "origins": "*",
+    "methods": ["GET", "POST", "OPTIONS"],
+    "allow_headers": ["Content-Type"]
+}})
+
+# Middleware to ensure all responses have CORS headers
+@app.after_request
+def add_cors_headers(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    return response
 
 # Configuration
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-here')
@@ -24,7 +38,7 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-here')
 # Initialize melody matcher
 melody_matcher = MelodyMatcher()
 
-# Initialize SocketIO with the app
+# Initialize SocketIO with the app - configure for CORS
 socketio.init_app(app, cors_allowed_origins="*")
 
 # Register blueprint for room routes
@@ -36,6 +50,15 @@ def home():
         'message': 'Welcome to the Piano Game Server!',
         'status': 'running'
     })
+
+# Add a route for handling OPTIONS requests (preflight)
+@app.route('/<path:path>', methods=['OPTIONS'])
+def handle_options(path):
+    response = app.make_default_options_response()
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    return response
 
 @app.route('/api/health')
 def health_check():
@@ -131,4 +154,11 @@ if __name__ == '__main__':
     
     # Run the server with SocketIO
     port = int(os.getenv('PORT', 5000))
-    socketio.run(app, host='0.0.0.0', port=port, debug=True) 
+    
+    # Enable CORS for WebSocket connections
+    socketio.run(app, 
+                host='0.0.0.0', 
+                port=port, 
+                debug=True,
+                allow_unsafe_werkzeug=True,  # Add this for debugging
+                cors_allowed_origins="*")  # Explicitly set CORS for WebSockets 
