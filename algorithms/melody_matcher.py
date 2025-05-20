@@ -1,25 +1,30 @@
 import numpy as np
 from typing import List, Tuple, Dict, Optional, Union
 import math
+import time
 
 class MelodyMatcher:
     def __init__(self):
         self.weights = {
             'dtw_pitch': 0.4,
-            'dtw_timing': 0.3,
+            'dtw_timing': 0.25,
             'levenshtein': 0.15,
             'lcs': 0.1,
-            'cosine': 0.05
+            'cosine': 0.1
         }
         
-        # MIDI note range for 2 octaves from C3 to B4 (for note name mapping)
+        # MIDI note range for 3 octaves from C3 to C6
         self.note_range = {
             # C3 to B3 (first octave)
             48: 'C3', 49: 'C#3', 50: 'D3', 51: 'D#3', 52: 'E3', 53: 'F3', 
             54: 'F#3', 55: 'G3', 56: 'G#3', 57: 'A3', 58: 'A#3', 59: 'B3',
             # C4 to B4 (second octave)
             60: 'C4', 61: 'C#4', 62: 'D4', 63: 'D#4', 64: 'E4', 65: 'F4',
-            66: 'F#4', 67: 'G4', 68: 'G#4', 69: 'A4', 70: 'A#4', 71: 'B4'
+            66: 'F#4', 67: 'G4', 68: 'G#4', 69: 'A4', 70: 'A#4', 71: 'B4',
+            # C5 to C6 (third octave)
+            72: 'C5', 73: 'C#5', 74: 'D5', 75: 'D#5', 76: 'E5', 77: 'F5',
+            78: 'F#5', 79: 'G5', 80: 'G#5', 81: 'A5', 82: 'A#5', 83: 'B5',
+            84: 'C6'
         }
 
     def dtw_distance(self, seq1: List[int], seq2: List[int], 
@@ -314,13 +319,16 @@ class MelodyMatcher:
         Returns:
             Dictionary with final score and individual scores
         """
+        start_time = time.time()
+        
         if not melody1 or not melody2:
             return {
                 'final_score': 0.0,
                 'pitch_accuracy': 0.0,
                 'timing_accuracy': 0.0,
                 'individual_scores': {},
-                'note_details': []
+                'note_details': [],
+                'matching_runtime_nocom': 0.0
             }
         
         # Run enhanced DTW with timing information if available
@@ -383,12 +391,17 @@ class MelodyMatcher:
         # Apply final non-linear transformation to make overall score more discriminating (less aggressive)
         final_score = final_score ** 1.15  # Reduced from 1.25 to 1.15
         
+        # Calculate runtime in milliseconds
+        end_time = time.time()
+        runtime_ms = (end_time - start_time) * 1000  # Convert to milliseconds
+        
         # Prepare response
         result = {
             'final_score': final_score,
             'pitch_accuracy': pitch_accuracy,
             'individual_scores': normalized_scores,
-            'note_details': note_details
+            'note_details': note_details,
+            'matching_runtime_nocom': runtime_ms
         }
         
         # Add timing specific results if available

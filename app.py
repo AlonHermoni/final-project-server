@@ -1,8 +1,15 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_socketio import SocketIO
 from dotenv import load_dotenv
 import os
+import threading
+import time
 from algorithms.melody_matcher import MelodyMatcher
+
+# Import our modules
+from api.room_routes import room_routes
+from socket.events import socketio
 
 # Load environment variables
 load_dotenv()
@@ -11,16 +18,22 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
+# Configuration
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-here')
+
 # Initialize melody matcher
 melody_matcher = MelodyMatcher()
 
-# Configuration
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-here')
+# Initialize SocketIO with the app
+socketio.init_app(app, cors_allowed_origins="*")
+
+# Register blueprint for room routes
+app.register_blueprint(room_routes, url_prefix='/api/room')
 
 @app.route('/')
 def home():
     return jsonify({
-        'message': 'Welcome to the Flask Server!',
+        'message': 'Welcome to the Piano Game Server!',
         'status': 'running'
     })
 
@@ -98,37 +111,24 @@ def compare_melodies():
             'error': str(e)
         }), 500
 
-@app.route('/api/estimate-difficulty', methods=['POST'])
-def estimate_difficulty():
-    try:
-        data = request.get_json()
+# Background task for cleaning up inactive rooms
+def cleanup_task():
+    """Background task to clean up inactive rooms"""
+    from game.manager import room_manager
+    
+    while True:
+        # Sleep for 60 seconds
+        time.sleep(60)
         
-        if not data or 'melody' not in data:
-            return jsonify({
-                'error': 'Missing required field: melody'
-            }), 400
-
-        melody = data['melody']
-
-        # Validate input
-        if not isinstance(melody, list):
-            return jsonify({
-                'error': 'Melody must be a list of integers'
-            }), 400
-
-        # Estimate difficulty
-        result = melody_matcher.get_difficulty_estimate(melody)
-        
-        return jsonify({
-            'success': True,
-            'result': result
-        })
-
-    except Exception as e:
-        return jsonify({
-            'error': str(e)
-        }), 500
+        # Cleanup inactive rooms
+        room_manager.cleanup_inactive_rooms()
 
 if __name__ == '__main__':
+    # Start the cleanup background task
+    cleanup_thread = threading.Thread(target=cleanup_task)
+    cleanup_thread.daemon = True
+    cleanup_thread.start()
+    
+    # Run the server with SocketIO
     port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True) 
+    socketio.run(app, host='0.0.0.0', port=port, debug=True) 
