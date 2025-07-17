@@ -1,18 +1,8 @@
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
-from flask_socketio import SocketIO
-from dotenv import load_dotenv
+from flask_socketio import SocketIO, emit
 import os
-import threading
-import time
 from algorithms.melody_matcher import MelodyMatcher
-
-# Import our modules
-from api.room_routes import room_routes
-from websocket_handlers.events import socketio
-
-# Load environment variables
-load_dotenv()
 
 # Initialize Flask app with static folder
 app = Flask(__name__, static_folder='static', static_url_path='/static')
@@ -24,26 +14,16 @@ CORS(app, resources={r"/*": {
     "allow_headers": ["Content-Type"]
 }})
 
-# The flask_cors extension handles this automatically.
-# This middleware is redundant and causes the double header issue.
-# @app.after_request
-# def add_cors_headers(response):
-#     response.headers.add('Access-Control-Allow-Origin', '*')
-#     response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-#     response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-#     return response
+# Initialize SocketIO with the app - configure for CORS
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# CORS is handled by Flask-CORS extension above
 
 # Configuration
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-here')
 
 # Initialize melody matcher
 melody_matcher = MelodyMatcher()
-
-# Initialize SocketIO with the app - configure for CORS
-socketio.init_app(app, cors_allowed_origins="*")
-
-# Register blueprint for room routes
-app.register_blueprint(room_routes, url_prefix='/api/room')
 
 @app.route('/')
 def home():
@@ -52,15 +32,7 @@ def home():
         'status': 'running'
     })
 
-# The flask_cors extension handles OPTIONS preflight requests automatically.
-# This route is redundant.
-# @app.route('/<path:path>', methods=['OPTIONS'])
-# def handle_options(path):
-#     response = app.make_default_options_response()
-#     response.headers.add('Access-Control-Allow-Origin', '*')
-#     response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-#     response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-#     return response
+# OPTIONS requests are handled by Flask-CORS extension
 
 @app.route('/static/<path:filename>')
 def static_files(filename):
@@ -181,30 +153,113 @@ def estimate_difficulty():
             'error': str(e)
         }), 500
 
-# Background task for cleaning up inactive rooms
-def cleanup_task():
-    """Background task to clean up inactive rooms"""
-    from game.manager import room_manager
+# Socket.IO events for basic multiplayer support
+@socketio.on('connect')
+def handle_connect():
+    print('Client connected')
+    # Generate a unique player ID using the socket session ID
+    player_id = request.sid
+    print(f'Assigning player ID: {player_id}')
+    # Send the player ID to the client immediately upon connection
+    emit('connected', {'player_id': player_id})
+    return True
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Client disconnected')
+
+@socketio.on('player_connected')
+def handle_player_connected(data):
+    player_id = data.get('player_id', 'unknown')
+    print(f'Player connected: {player_id}')
+    emit('player_id_assigned', {'player_id': player_id})
+
+@socketio.on('create_room')
+def handle_create_room(data):
+    player_name = data.get('player_name', 'Unknown Player')
+    player_id = data.get('player_id', request.sid)
     
-    while True:
-        # Sleep for 60 seconds
-        time.sleep(60)
-        
-        # Cleanup inactive rooms
-        room_manager.cleanup_inactive_rooms()
+    # Generate a simple room ID
+    import uuid
+    room_id = str(uuid.uuid4())[:8]
+    
+    print(f'Player {player_name} ({player_id}) creating room {room_id}')
+    
+    # For now, just emit a basic room update
+    room_data = {
+        'id': room_id,
+        'players': [{'id': player_id, 'name': player_name, 'score': 0}],
+        'state': 'waiting',
+        'current_round': 1,
+        'total_rounds': 3,
+        'active_player': player_id,
+        'challenge_player': None,
+        'current_challenge': None
+    }
+    
+    emit('room_update', {'room': room_data})
+
+@socketio.on('join_room')
+def handle_join_room(data):
+    room_id = data.get('room_id', '')
+    player_name = data.get('player_name', 'Unknown Player')
+    player_id = data.get('player_id', request.sid)
+    
+    print(f'Player {player_name} ({player_id}) joining room {room_id}')
+    
+    # For now, just emit a basic room update
+    room_data = {
+        'id': room_id,
+        'players': [
+            {'id': 'existing_player', 'name': 'Existing Player', 'score': 0},
+            {'id': player_id, 'name': player_name, 'score': 0}
+        ],
+        'state': 'waiting',
+        'current_round': 1,
+        'total_rounds': 3,
+        'active_player': 'existing_player',
+        'challenge_player': player_id,
+        'current_challenge': None
+    }
+    
+    emit('room_update', {'room': room_data})
+
+@socketio.on('leave_room')
+def handle_leave_room(data):
+    room_id = data.get('room_id', '')
+    player_id = data.get('player_id', request.sid)
+    
+    print(f'Player {player_id} leaving room {room_id}')
+    
+    # Just acknowledge the leave for now
+    emit('room_left', {'success': True})
+
+@socketio.on('record_melody')
+def handle_record_melody(data):
+    room_id = data.get('room_id', '')
+    player_id = data.get('player_id', request.sid)
+    melody = data.get('melody', {})
+    
+    print(f'Player {player_id} recorded melody in room {room_id}')
+    
+    # Emit new challenge to the room
+    emit('new_challenge', {'melody': melody})
+
+@socketio.on('submit_replay')
+def handle_submit_replay(data):
+    room_id = data.get('room_id', '')
+    player_id = data.get('player_id', request.sid)
+    melody = data.get('melody', {})
+    
+    print(f'Player {player_id} submitted replay in room {room_id}')
+    
+    # Calculate a simple score (for testing)
+    score = {'final_score': 0.85, 'pitch_accuracy': 0.9}
+    
+    # Emit score update
+    emit('score_update', {'score': score})
 
 if __name__ == '__main__':
-    # Start the cleanup background task
-    cleanup_thread = threading.Thread(target=cleanup_task)
-    cleanup_thread.daemon = True
-    cleanup_thread.start()
-    
     # Run the server with SocketIO
     port = int(os.getenv('PORT', 5001))
-    
-    # Enable CORS for WebSocket connections
-    socketio.run(app, 
-                host='0.0.0.0', 
-                port=port, 
-                debug=True,
-                allow_unsafe_werkzeug=True)  # Remove cors_allowed_origins parameter 
+    socketio.run(app, host='0.0.0.0', port=port, debug=True, allow_unsafe_werkzeug=True) 

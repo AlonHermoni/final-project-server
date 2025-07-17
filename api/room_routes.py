@@ -1,8 +1,9 @@
 from flask import Blueprint, jsonify, request
+from flask_socketio import emit
 from typing import Dict, Any
 
-from flask_server.game.manager import room_manager
-from flask_server.algorithms.melody_matcher import MelodyMatcher
+from game.manager import room_manager
+from algorithms.melody_matcher import MelodyMatcher
 
 # Initialize melody matcher
 melody_matcher = MelodyMatcher()

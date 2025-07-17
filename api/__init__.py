@@ -1,1 +1,1 @@
-from flask_server.api.room_routes import room_routes
+from .room_routes import room_routes
