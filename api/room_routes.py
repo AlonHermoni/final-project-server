@@ -289,7 +289,6 @@ def submit_replay():
         'next_player': result['next_player'],
         'message': f'Score received: {score_result.get("final_score", 0):.2f}'
     }, room=room_id, namespace='/')
-
     return jsonify({
         'success': True,
         'score': score_result,
