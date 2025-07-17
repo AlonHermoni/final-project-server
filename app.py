@@ -9,7 +9,6 @@ from algorithms.melody_matcher import MelodyMatcher
 
 # Import our modules
 from api.room_routes import room_routes
-from websocket_handlers.events import socketio
 
 # Load environment variables
 load_dotenv()
@@ -40,7 +39,11 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-here')
 melody_matcher = MelodyMatcher()
 
 # Initialize SocketIO with the app - configure for CORS
-socketio.init_app(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Import and register WebSocket events after socketio is created
+from websocket_handlers.events import register_socketio_events
+register_socketio_events(socketio)
 
 # Register blueprint for room routes
 app.register_blueprint(room_routes, url_prefix='/api/room')
@@ -68,10 +71,25 @@ def static_files(filename):
 
 @app.route('/api/health')
 def health_check():
-    return jsonify({
-        'status': 'healthy',
-        'version': '1.0.0'
-    })
+    try:
+        # Test melody matcher is working
+        test_result = melody_matcher.calculate_dtw_distance([60, 62], [60, 62], [0, 500], [0, 500])
+        return jsonify({
+            'status': 'healthy',
+            'service': 'piano-game-server',
+            'version': '1.0.0',
+            'timestamp': int(time.time()),
+            'melody_matcher': 'working',
+            'socketio': 'enabled'
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'service': 'piano-game-server',
+            'version': '1.0.0',
+            'timestamp': int(time.time()),
+            'error': str(e)
+        }), 500
 
 @app.route('/api/compare-melodies', methods=['POST'])
 def compare_melodies():
