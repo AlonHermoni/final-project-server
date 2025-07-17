@@ -1,0 +1,39 @@
+# Python cache and compiled files
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+
+# Environment and secrets
+.env
+.env.*
+
+# Version control and docs
+.git
+.gitignore
+README.md
+DEPLOYMENT.md
+SERVER_MANAGEMENT.md
+
+# Docker files
+Dockerfile
+.dockerignore
+
+# Development files
+venv/
+.venv/
+server.log
+server.pid
+*.log
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
