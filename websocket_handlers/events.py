@@ -27,16 +27,28 @@ def register_socketio_events(socketio):
         room_id = data['room_id']
         player_id = data['player_id']
         
+        # DEBUG: Add comprehensive logging
+        print(f"🔍 DEBUG: WebSocket join_room called with room_id='{room_id}', player_id='{player_id}'")
+        print(f"🔍 DEBUG: All rooms in manager: {list(room_manager.rooms.keys())}")
+        print(f"🔍 DEBUG: WebSocket room manager instance ID: {id(room_manager)}")
+        
         # Check if room exists
         room = room_manager.get_room(room_id)
         if not room:
+            print(f"❌ DEBUG: Room '{room_id}' not found in room_manager")
+            print(f"❌ DEBUG: Available rooms: {room_manager.rooms}")
             emit('error', {'message': 'Room not found'})
             return
         
+        print(f"✅ DEBUG: Room '{room_id}' found successfully")
+        
         # Check if player is in the room
         if player_id not in room.players:
+            print(f"❌ DEBUG: Player '{player_id}' not in room players: {list(room.players.keys())}")
             emit('error', {'message': 'Player not in room'})
             return
+        
+        print(f"✅ DEBUG: Player '{player_id}' found in room")
         
         # Join the socket.io room with this ID
         join_room(room_id)
