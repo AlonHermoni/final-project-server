@@ -27,4 +27,4 @@ EXPOSE 8080
 
 # Use gunicorn with eventlet worker for WebSocket support
 # Note: For SocketIO with eventlet, we target the Flask app object
-CMD exec gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT --timeout 120 "app:app"
+CMD exec gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT --timeout 300 --worker-connections 1000 "app:application"

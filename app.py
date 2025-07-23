@@ -211,21 +211,33 @@ def cleanup_task():
         # Cleanup inactive rooms
         room_manager.cleanup_inactive_rooms()
 
-# Start cleanup background task when module is imported
+# Create a WSGI application for production deployment
+def create_app():
+    """Create and configure the Flask-SocketIO application for WSGI deployment"""
+    # Start the cleanup background task
+    cleanup_thread = threading.Thread(target=cleanup_task)
+    cleanup_thread.daemon = True
+    cleanup_thread.start()
+    
+    return app
+
+# For gunicorn deployment - ensure SocketIO is properly initialized
+# Start the cleanup background task for production
 cleanup_thread = threading.Thread(target=cleanup_task)
 cleanup_thread.daemon = True
 cleanup_thread.start()
 
+# Export the Flask app (not socketio) as the WSGI application
+# The socketio instance wraps the Flask app and handles both HTTP and WebSocket
+application = app
+
 if __name__ == '__main__':
-    # Run the server with SocketIO for WebSocket support
+    # Run the server with SocketIO for local development
     port = int(os.getenv('PORT', 5001))
     
-    # Determine if running in production (Cloud Run)
-    is_production = os.getenv('GAE_ENV', '').startswith('standard') or os.getenv('K_SERVICE') is not None
-    
-    # Use SocketIO to support WebSocket connections
+    # Enable CORS for WebSocket connections
     socketio.run(app, 
                 host='0.0.0.0', 
                 port=port, 
-                debug=not is_production,  # Disable debug in production
-                allow_unsafe_werkzeug=True)
+                debug=True,
+                allow_unsafe_werkzeug=True)  # Remove cors_allowed_origins parameter 
